@@ -18,19 +18,28 @@ type MulticastMessage struct {
 	MulticastString string
 	PubKeyStr       string
 	Port            string
+	Username        string
 }
 
 func UDPMulticastMessageToPeer(bytes []byte) (*MulticastMessage, error) {
 	bytes = b.Trim(bytes, nullByte)
 	array := strings.Split(string(bytes), ":")
 
-	if len(array) != 3 {
+	// Support both old format (3 fields) and new format (4 fields with username)
+	if len(array) < 3 || len(array) > 4 {
 		return nil, ErrBadMulticastMessage
 	}
 
-	return &MulticastMessage{
+	msg := &MulticastMessage{
 		MulticastString: array[0],
 		PubKeyStr:       array[1],
 		Port:            array[2],
-	}, nil
+	}
+	
+	// Username is optional (4th field)
+	if len(array) == 4 {
+		msg.Username = array[3]
+	}
+
+	return msg, nil
 }

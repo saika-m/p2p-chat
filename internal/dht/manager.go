@@ -157,6 +157,7 @@ type peerHandler struct {
 }
 
 func (h *peerHandler) HandlePeerFound(info peer.AddrInfo) {
+	log.Printf("dht: mdns discovered peer %s addrs %v", info.ID.String(), info.Addrs)
 	h.host.Peerstore().AddAddrs(info.ID, info.Addrs, peerstore.PermanentAddrTTL)
 	if h.peerFoundCb != nil {
 		h.peerFoundCb(info.ID.String(), info.Addrs)

@@ -1,6 +1,8 @@
 package proto
 
 import (
+	"encoding/base64"
+	
 	"p2p-messenger/internal/crypto"
 	"p2p-messenger/internal/repository"
 )
@@ -35,8 +37,9 @@ func NewProto(port string) (*Proto, error) {
 		username = username[:8]
 	}
 
+	// Encode public key as base64 to avoid special characters breaking message parsing
 	return &Proto{
-		PublicKeyStr: string(pubKey),
+		PublicKeyStr: base64.StdEncoding.EncodeToString(pubKey),
 		PublicKey:    pubKey,
 		PrivateKey:   keypair,
 		Peers:        repository.NewPeerRepository(),

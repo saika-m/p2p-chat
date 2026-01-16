@@ -37,6 +37,7 @@ type Manager struct {
 type entityProto struct {
 	PublicKeyStr string
 	Port         string
+	Username     string
 	Peers        peerRepository
 }
 
@@ -105,13 +106,14 @@ func (m *Manager) IsAvailable() bool {
 	}
 }
 
-func NewManager(publicKeyStr string, port string, peers peerRepository) *Manager {
+func NewManager(publicKeyStr string, port string, username string, peers peerRepository) *Manager {
 	return &Manager{
 		serviceUUID: ble.MustParse(bleServiceUUIDStr),
 		metaUUID:    ble.MustParse(bleMetaCharacteristic),
 		proto: &entityProto{
 			PublicKeyStr: publicKeyStr,
 			Port:         port,
+			Username:     username,
 			Peers:        peers,
 		},
 	}
@@ -133,6 +135,7 @@ func (m *Manager) Start() {
 		return
 	}
 	ble.SetDefaultDevice(dev)
+	log.Printf("bluetooth: default BLE device set")
 
 	if err := m.addService(); err != nil {
 		log.Printf("bluetooth: unable to register service: %v", err)
@@ -187,6 +190,13 @@ func (m *Manager) scan(ctx context.Context) {
 }
 
 func (m *Manager) handleAdvertisement(a ble.Advertisement) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Handle UUID parsing panics gracefully (e.g., "invalid UUID string: DAF55501")
+			log.Printf("bluetooth: recovered from panic in handleAdvertisement: %v", r)
+		}
+	}()
+
 	// Try to read metadata from advertisement data without connecting
 	var metaPayload string
 
@@ -236,9 +246,9 @@ func (m *Manager) handleAdvertisement(a ble.Advertisement) {
 				return
 			}
 
-			// Convert public key string to bytes
-			pubKeyBytes := []byte(meta.PubKeyStr)
-			if len(pubKeyBytes) != 32 {
+			// Decode public key from base64
+			pubKeyBytes, err := base64.StdEncoding.DecodeString(meta.PubKeyStr)
+			if err != nil || len(pubKeyBytes) != 32 {
 				return
 			}
 
@@ -249,9 +259,11 @@ func (m *Manager) handleAdvertisement(a ble.Advertisement) {
 				Port:      meta.Port,
 				Messages:  make([]*entity.Message, 0),
 				BLEAddr:   a.Addr().String(),
+				Username:  meta.Username,
 			}
 			peer.AddConnectionType(entity.ConnectionBLE)
 
+			log.Printf("bluetooth: discovered BLE peer %s at %s", peerID, a.Addr().String())
 			m.proto.Peers.Add(peer)
 			return
 		}
@@ -260,30 +272,43 @@ func (m *Manager) handleAdvertisement(a ble.Advertisement) {
 	// If no metadata found in advertisement, try reading from characteristic
 	// This requires a connection but is reliable
 	if !a.Connectable() {
+		// Only log verbose if we haven't seen this peer recently to avoid spam,
+		// but for now we want to debug why we aren't connecting
+		// log.Printf("bluetooth: device %s not connectable", a.Addr())
 		return
 	}
+
+	log.Printf("bluetooth: found connectable device %s, attempting connection to read metadata...", a.Addr())
 
 	ctx, cancel := context.WithTimeout(context.Background(), connectionTimeout)
 	defer cancel()
 
 	client, err := ble.Dial(ctx, a.Addr())
 	if err != nil {
+		log.Printf("bluetooth: failed to dial device %s: %v", a.Addr(), err)
 		return
 	}
 	defer client.CancelConnection()
 
+	log.Printf("bluetooth: connected to %s, looking for characteristic...", a.Addr())
+
 	characteristic, err := m.findMetaCharacteristic(ctx, client)
 	if err != nil || characteristic == nil {
+		log.Printf("bluetooth: failed to find characteristic on %s: %v", a.Addr(), err)
 		return
 	}
 
 	data, err := client.ReadCharacteristic(characteristic)
 	if err != nil || len(data) == 0 {
+		log.Printf("bluetooth: failed to read characteristic from %s: %v", a.Addr(), err)
 		return
 	}
 
+	log.Printf("bluetooth: successfully read metadata from %s (len=%d)", a.Addr(), len(data))
+
 	meta, err := parseMetadata(string(data))
 	if err != nil {
+		log.Printf("bluetooth: failed to parse metadata from %s: %v", a.Addr(), err)
 		return
 	}
 
@@ -292,9 +317,9 @@ func (m *Manager) handleAdvertisement(a ble.Advertisement) {
 		return
 	}
 
-	// Convert public key string to bytes
-	pubKeyBytes := []byte(meta.PubKeyStr)
-	if len(pubKeyBytes) != 32 {
+	// Decode public key from base64
+	pubKeyBytes, err := base64.StdEncoding.DecodeString(meta.PubKeyStr)
+	if err != nil || len(pubKeyBytes) != 32 {
 		return
 	}
 
@@ -305,9 +330,11 @@ func (m *Manager) handleAdvertisement(a ble.Advertisement) {
 		Port:      meta.Port,
 		Messages:  make([]*entity.Message, 0),
 		BLEAddr:   a.Addr().String(),
+		Username:  meta.Username,
 	}
 	peer.AddConnectionType(entity.ConnectionBLE)
 
+	log.Printf("bluetooth: discovered BLE peer %s at %s", peerID, a.Addr().String())
 	m.proto.Peers.Add(peer)
 }
 
@@ -344,32 +371,48 @@ func (m *Manager) addService() error {
 }
 
 func (m *Manager) metadataPayload() string {
-	// Minimal metadata: only public key and port (no name, no IP for privacy)
-	// Public key is necessary for Noise Protocol handshake
+	// Include username in metadata
 	return strings.Join([]string{
 		m.proto.PublicKeyStr,
 		m.proto.Port,
+		m.proto.Username,
 	}, "|")
 }
 
 type metadata struct {
 	PubKeyStr string
 	Port      string
+	Username  string
 }
 
 func parseMetadata(payload string) (*metadata, error) {
 	parts := strings.Split(payload, "|")
-	if len(parts) != 2 {
+	// Support both old format (2 fields) and new format (3 fields with username)
+	if len(parts) < 2 || len(parts) > 3 {
 		return nil, fmt.Errorf("invalid metadata payload")
 	}
 
-	return &metadata{
+	meta := &metadata{
 		PubKeyStr: parts[0],
 		Port:      parts[1],
-	}, nil
+	}
+
+	// Username is optional (3rd field)
+	if len(parts) == 3 {
+		meta.Username = parts[2]
+	}
+
+	return meta, nil
 }
 
 func hasService(a ble.Advertisement, uuid ble.UUID) bool {
+	defer func() {
+		if r := recover(); r != nil {
+			// Handle UUID parsing panics gracefully
+			log.Printf("bluetooth: recovered from UUID panic in hasService: %v", r)
+		}
+	}()
+
 	for _, srv := range a.Services() {
 		if srv.Equal(uuid) {
 			return true

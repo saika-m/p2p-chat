@@ -4,9 +4,9 @@
 
 set -e
 
-APP_NAME="P2P Chat"
+APP_NAME="LocalChat"
 APP_BUNDLE="${APP_NAME}.app"
-BINARY_NAME="p2p-chat"
+BINARY_NAME="LocalChat-bin"
 BUILD_DIR="build"
 APP_DIR="${BUILD_DIR}/${APP_BUNDLE}"
 CONTENTS_DIR="${APP_DIR}/Contents"
@@ -32,7 +32,7 @@ cat > "${MACOS_DIR}/${APP_NAME}" <<'SCRIPT'
 #!/bin/bash
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY="${SCRIPT_DIR}/p2p-chat"
+BINARY="${SCRIPT_DIR}/LocalChat-bin"
 
 # Open Terminal and run the binary
 osascript <<EOF
@@ -54,7 +54,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <key>CFBundleExecutable</key>
     <string>${APP_NAME}</string>
     <key>CFBundleIdentifier</key>
-    <string>com.p2pchat.app</string>
+    <string>com.LocalChat.app</string>
     <key>CFBundleName</key>
     <string>${APP_NAME}</string>
     <key>CFBundlePackageType</key>

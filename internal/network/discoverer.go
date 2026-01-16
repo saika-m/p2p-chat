@@ -1,11 +1,13 @@
 package network
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net"
 	"time"
 
+	"p2p-messenger/internal/crypto"
 	"p2p-messenger/internal/entity"
 	"p2p-messenger/internal/proto"
 	"p2p-messenger/pkg/udp"
@@ -54,11 +56,15 @@ func (d *Discoverer) startMulticasting() {
 
 	for {
 		<-ticker.C
-		// Minimal metadata: only public key and port (no name for privacy)
-		_, err := conn.Write([]byte(fmt.Sprintf("%s:%s:%s",
+		// Include username in multicast message
+		// Format: multicastString:PubKeyStr:Port:Username
+		msg := fmt.Sprintf("%s:%s:%s:%s",
 			multicastString,
 			d.Proto.PublicKeyStr,
-			d.Proto.Port)))
+			d.Proto.Port,
+			d.Proto.Username)
+
+		_, err := conn.Write([]byte(msg))
 		if err != nil {
 			log.Printf("discoverer: multicast write error: %v, attempting to reconnect...", err)
 			conn.Close()
@@ -120,23 +126,28 @@ func (d *Discoverer) listenMulticasting() {
 
 		message, err := entity.UDPMulticastMessageToPeer(rawBytes)
 		if err != nil {
-			log.Printf("discoverer: failed to parse multicast message: %v", err)
+			// Log parse errors occasionally (not every time to avoid spam)
+			log.Printf("discoverer: failed to parse multicast message: %v, from %s", err, addr.IP.String())
 			continue // Skip invalid messages, don't crash
 		}
 
-		// Convert public key string to bytes
-		pubKeyBytes := []byte(message.PubKeyStr)
-		if len(pubKeyBytes) != 32 {
+		log.Printf("discoverer: discovered peer from %s (Port=%s, Username=%s)", addr.IP.String(), message.Port, message.Username)
+
+		// Decode public key from base64
+		pubKeyBytes, err := base64.StdEncoding.DecodeString(message.PubKeyStr)
+		if err != nil || len(pubKeyBytes) != 32 {
+			log.Printf("discoverer: invalid public key format (not base64 or wrong length): %v", err)
 			continue
 		}
 
-		peerID := entity.PeerIDFromPublicKey(pubKeyBytes)
+		peerID := crypto.PeerID(pubKeyBytes)
 		peer := &entity.Peer{
 			PeerID:    peerID,
 			PublicKey: pubKeyBytes,
 			Port:      message.Port,
 			Messages:  make([]*entity.Message, 0),
 			AddrIP:    addr.IP.String(),
+			Username:  message.Username,
 		}
 		peer.AddConnectionType(entity.ConnectionNAT)
 

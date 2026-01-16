@@ -57,19 +57,32 @@ func NewManager(proto *proto.Proto) *Manager {
 	dhtPeerFoundCb := func(peerID string, addrs []multiaddr.Multiaddr) {
 		// Extract IP and port from multiaddr
 		for _, addr := range addrs {
-			// Try to extract /ip4 or /ip6 address and /tcp port
-			ip := ""
-			port := ""
-			addrStr := addr.String()
-			// Parse multiaddr format: /ip4/192.168.1.1/tcp/1234
-			// This is simplified - in production, use proper multiaddr parsing
-			if len(addrStr) > 0 {
-				// For now, we'll use mDNS discovered peers which have IP addresses
-				// DHT peers need libp2p connection handling which is more complex
-				// So we'll focus on mDNS for now
+			var ip string
+			var port string
+			
+			// Parse multiaddr to extract IP and port
+			multiaddr.ForEach(addr, func(c multiaddr.Component) bool {
+				switch c.Protocol().Code {
+				case multiaddr.P_IP4, multiaddr.P_IP6:
+					ip = c.Value()
+				case multiaddr.P_TCP, multiaddr.P_UDP:
+					port = c.Value()
+				}
+				return true
+			})
+			
+			// Only process if we have both IP and port, and it's not a local/private IP
+			if ip != "" && port != "" {
+				// Check if it's a public IP (not localhost or private)
+				ipAddr := net.ParseIP(ip)
+				if ipAddr != nil && !ipAddr.IsLoopback() && !ipAddr.IsPrivate() {
+					// Try to find existing peer by public key hash (peerID from DHT is libp2p peer ID, not our peer ID)
+					// For now, we'll create a peer entry but we need the public key from the handshake
+					// Since DHT uses libp2p peer IDs which are different from our Noise Protocol peer IDs,
+					// we can't directly match. We'll need to match during handshake.
+					// For now, skip DHT peers without public key - they'll be matched during handshake
+				}
 			}
-			_ = ip
-			_ = port
 		}
 	}
 
@@ -82,7 +95,7 @@ func NewManager(proto *proto.Proto) *Manager {
 		Proto:      proto,
 		Listener:   NewListener(listenerAddr, proto),
 		Discoverer: NewDiscoverer(multicastAddr, MulticastFrequency, proto),
-		BLE:        bluetooth.NewManager(proto.PublicKeyStr, proto.Port, proto.Peers),
+		BLE:        bluetooth.NewManager(proto.PublicKeyStr, proto.Port, proto.Username, proto.Peers),
 		DHT:        dhtManager,
 	}
 }

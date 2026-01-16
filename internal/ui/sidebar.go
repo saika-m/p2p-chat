@@ -37,16 +37,17 @@ func (s *Sidebar) Reprint() {
 	s.View.Clear()
 
 	for _, peer := range peers {
-		// Display peer ID (first 8 chars for brevity) instead of name for privacy
-		displayID := peer.PeerID
-		if len(displayID) > 8 {
-			displayID = displayID[:8] + "..."
+		// Display username only (no ID)
+		displayName := peer.Username
+		if displayName == "" {
+			displayName = peer.PeerID
 		}
 		
-		// Add connection type indicators
+		// Add connection type indicators on the leftmost
 		connTypes := s.formatConnectionTypes(peer)
-		displayText := fmt.Sprintf("%s %s", displayID, connTypes)
+		displayText := fmt.Sprintf("%s %s", connTypes, displayName)
 		
+		// Store peerID in secondary text (not displayed) for retrieval
 		s.View.
 			AddItem(displayText, peer.PeerID, 0, nil)
 	}
@@ -70,7 +71,7 @@ func (s *Sidebar) formatConnectionTypes(peer *entity.Peer) string {
 	}
 	
 	if len(indicators) > 0 {
-		return fmt.Sprintf("(%s)", strings.Join(indicators, ","))
+		return fmt.Sprintf("(%s) ", strings.Join(indicators, ","))
 	}
 	return ""
 }

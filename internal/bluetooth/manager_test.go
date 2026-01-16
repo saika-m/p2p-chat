@@ -23,8 +23,8 @@ func TestManager(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create two managers
-	manager1 := NewManager(proto1.PublicKeyStr, proto1.Port, proto1.Peers)
-	manager2 := NewManager(proto2.PublicKeyStr, proto2.Port, proto2.Peers)
+	manager1 := NewManager(proto1.PublicKeyStr, proto1.Port, proto1.Username, proto1.Peers)
+	manager2 := NewManager(proto2.PublicKeyStr, proto2.Port, proto2.Username, proto2.Peers)
 
 	// Start managers
 	manager1.Start()

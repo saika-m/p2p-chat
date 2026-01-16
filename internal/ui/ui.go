@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -140,19 +141,17 @@ func (app *App) initBindings() {
 				author = crypto.PeerID(app.Proto.PublicKey)
 			}
 
+			// Add message immediately to show on sender's screen
+			peer.AddMessage(message, author)
+
 			go func() {
-				if err := peer.SendMessage(message); err != nil {
-					app.UI.QueueUpdateDraw(func() {
-						app.Proto.Peers.Delete(peer.PeerID)
-						app.Chat.View.SetTitle("chat")
-						app.Chat.Messages.SetText("")
-						app.CurrentPeer = nil
-						app.UI.SetFocus(app.Sidebar.View)
-					})
-				} else {
-					app.UI.QueueUpdateDraw(func() {
-						app.CurrentPeer.AddMessage(message, author)
-					})
+				if err := peer.SendMessage(message, app.Proto.PrivateKey); err != nil {
+					// Don't delete peer on temporary errors - log and continue
+					// Only delete on permanent connection failures
+					// The peer validator will handle cleanup of truly dead peers
+					log.Printf("ui: failed to send message to %s: %v", peer.PeerID, err)
+					// Don't clear the chat - let user see the message they sent
+					// The peer validator will remove truly dead peers
 				}
 			}()
 
@@ -174,12 +173,14 @@ func (app *App) toggleTutorial() {
 
 func (app *App) renderMessages() {
 	if app.CurrentPeer != nil {
-		app.Chat.RenderMessages(app.CurrentPeer.Messages, app.CurrentPeer.PeerID)
-		// Display shortened peer ID in title with connection type
-		title := app.CurrentPeer.PeerID
-		if len(title) > 12 {
-			title = title[:12] + "..."
+		// Use current user's username/ID for author comparison
+		currentUserID := app.Proto.Username
+		if currentUserID == "" {
+			currentUserID = crypto.PeerID(app.Proto.PublicKey)
 		}
+		app.Chat.RenderMessages(app.CurrentPeer.Messages, currentUserID)
+		// Display full peer ID in title with connection type
+		title := app.CurrentPeer.PeerID
 
 		// Add connection type indicator
 		if len(app.CurrentPeer.ConnectionTypes) > 0 {
